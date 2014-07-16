@@ -8,30 +8,22 @@ import System.Environment
 
 -- Streaming & Parsing
 import GHC.Generics
---import System.IO
 import System.Process
---import Control.Monad.Trans.Resource
+import Control.Applicative
+import Control.Monad
 import Control.Monad.IO.Class (liftIO)
-import Control.Monad.Trans.Class (lift)
 import qualified Data.Text as T
 import Data.Conduit as C
-import Data.Conduit.List as CL
 import Data.Aeson
-import Data.Aeson.Types
-import Data.Conduit
---import Data.Conduit.Process
 import qualified Data.ByteString.Lazy as B
 import qualified Data.ByteString.Lazy.Char8 as BSC
---import HSH
-import qualified Data.Vector as V
-
+import Data.Maybe
 -- Journal data management
 import qualified Data.Map as Map
 -- Binary tree map, cf HashMap
 
-
-data Journal = Journal { tags :: [T.Text]
-                       , entries :: Entries
+data Journal = Journal { tags :: Map.Map T.Text Int --[T.Text]
+                       , entries :: [Entry]
                        } deriving (Show, Generic)
 
 type Title = T.Text
@@ -44,16 +36,30 @@ data Entry = Entry { body :: T.Text
                    , time :: T.Text
                    } deriving (Show, Generic)
 
-instance FromJSON Entry
+instance FromJSON Journal where
+    parseJSON (Object v) = Journal <$>
+                           v .: "tags" <*>
+                           v .: "entries"
+    parseJSON _          = mzero
+
+instance FromJSON Entry where
+    parseJSON (Object v) = Entry <$>
+                           v .: "body" <*>
+                           v .: "starred" <*>
+                           v .: "date" <*>
+                           v .: "title" <*>
+                           v .: "time"
+    parseJSON _          = mzero
 
 
 main :: IO ()
 main = do
   args <- getArgs
-  fname <- if length args > 1 then return $ args !! 0 else return "journal.txt"
-  putStrLn $ "jrnl filename: " ++ fname
-  journal <- readJournal fname -- :: IO (Maybe Journal)
-
+  jname <- if length args > 1 then return $ args !! 0 else return "default"
+  putStrLn $ "reading from journal: " ++ jname
+  mjournal <- readJournal jname -- :: IO (Maybe Journal)
+  let newest = head . entries $ fromJust mjournal
+  print (date newest) >> print (time newest) >> print (title newest)
   putStrLn "done" >> return ()
   -- Print each title in listings
 {-  runCurses $ do
@@ -85,56 +91,23 @@ eventer (EventCharacter c)
     | c == 'k' = return False -- move down
 
 -- Takes journal name and returns journal structure.
--- Passes to source, then to json parser as a sink.
-readJournal :: String -> IO (Maybe Value)
-readJournal n = journalSource n $$ parseEntries $= do
-                  x <- await
-                  liftIO . putStrLn $ show x
-                  return Nothing
---parseJournal name = journalSource $$ lift . decode
+-- Passes to source, then to json parser as a conduit
+readJournal :: String -> IO (Maybe Journal)
+readJournal n = journalSource n $$ parseJournal $= await >>= return
 
---journalSource :: String -> ConduitM () B.ByteString IO ()
---journalSource fname = runResourceT $ do { sourceCmd "jrnl --export json" }
-parseEntries :: Conduit B.ByteString IO Value
-parseEntries =
-    do 
-      mjson <- await
-      case mjson of
-        Nothing -> return ()
-        Just json ->
-            do 
-              let parsed = lift $ decode json
-              liftIO $ putStrLn "here"
-              let es = lift $ flip parseMaybe parsed $
-                       \obj -> lift (.:) obj "entries"
---                  case entries of
---                    Array a -> return (Just a)
---                    _ -> return Nothing
-              case es of
-                Just a -> V.mapM_ yield a
-                Nothing -> return ()
-              return ()
-
+parseJournal :: Conduit B.ByteString IO Journal
+parseJournal =
+    awaitForever $ \jobj ->
+        do
+          let parsed = decode jobj :: Maybe Journal
+          case parsed of
+            Nothing -> liftIO $ putStrLn "json not decoded" >> return ()
+            Just jrn -> yield jrn >> return ()
 
 journalSource :: String -> Source IO B.ByteString
 journalSource name =
     do
       journalString <- liftIO $ readProcess "jrnl"
-                       [name, "-until \"july 27\"", "--export json"] []
+                       [name, "-1", "--export", "json"] ""
       yield $ BSC.pack journalString
       return ()
---    file <- liftIO $ rawSystem "jrnl -until 'july 27' --export json" []
---    yield $ T.pack file
---    file <- liftIO $ openFile name ReadMode
---    addCleanup (const $ hClose file) $ loopOver file
---    loopOver file
-{-  where
-    loopOver f = do -- we're in ConduitM i o IO T.Text
-        eof <- liftIO $ hIsEOF f
-        if eof
-        then return ()
-        else do
-          line <- liftIO $ hGetLine f
-          yield $ T.pack line
-          loopOver f
--}
