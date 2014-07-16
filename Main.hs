@@ -5,6 +5,7 @@ module Main where
 import UI.NCurses
 --import UI.NCurses.Panel
 import System.Environment
+import System.Exit
 
 -- Streaming & Parsing
 import GHC.Generics
@@ -17,7 +18,7 @@ import Data.Conduit as C
 import Data.Aeson
 import qualified Data.ByteString.Lazy as B
 import qualified Data.ByteString.Lazy.Char8 as BSC
-import Data.Maybe
+
 -- Journal data management
 import qualified Data.Map as Map
 -- Binary tree map, cf HashMap
@@ -51,6 +52,8 @@ instance FromJSON Entry where
                            v .: "time"
     parseJSON _          = mzero
 
+type Dim = (Integer, Integer)
+
 
 main :: IO ()
 main = do
@@ -58,37 +61,50 @@ main = do
   jname <- if length args > 1 then return $ args !! 0 else return "default"
   putStrLn $ "reading from journal: " ++ jname
   mjournal <- readJournal jname -- :: IO (Maybe Journal)
-  let newest = head . entries $ fromJust mjournal
-  print (date newest) >> print (time newest) >> print (title newest)
-  putStrLn "done" >> return ()
-  -- Print each title in listings
-{-  runCurses $ do
-         setEcho False -- what is this? check ncurses docs
-         w <- newWindow 0 0 0 0
-         updateWindow w $ do
-                -- get data from jrnl after parsing arguments
-                moveCursor 1 10
-                drawString "Hello world!"
-                -- moveCursor 3 10
-                -- drawString "(press q to quit)"
-                -- moveCursor 0 0
-         render
-         waitFor w eventer
--}
+  --let newest = head . entries $ fromJust mjournal
+  --print (date newest) >> print (time newest) >> print (title newest)
+  case mjournal of
+    Nothing -> exitFailure
+    Just jrnl -> runCurses $ displayJournal jrnl
+  return ()
 
-waitFor :: Window -> (Event -> Update Bool) -> Curses ()
-waitFor w action = loop where
+-- Print each title in listings
+displayJournal :: Journal -> Curses ()
+displayJournal j = do
+  setEcho False -- what is this? check ncurses docs
+  w <- newWindow 0 0 0 0
+  dim <- screenSize
+  updateWindow w $ paintJrnl dim j
+  render
+  waitFor w j eventer
+
+paintJrnl :: Dim -> Journal -> Update ()
+paintJrnl (rows, cols) j = do
+  let len = min (fromInteger rows) . length $ entries j
+  forM_ (zip [0..len] $ (reverse $ entries j)) $ \(i, e) ->
+      do moveCursor (toInteger i)  0
+         drawText (T.take (fromInteger cols) $ displayTitle e)
+
+displayTitle :: Entry -> T.Text
+displayTitle e = 
+  T.concat [(date e), ", ", (time e), "   ", (title e)]
+
+waitFor :: Window -> Journal -> (Event -> Journal -> Update ()) -> Curses ()
+waitFor w j action = loop where
     loop = do
       ev <- getEvent w Nothing
       case ev of
         Nothing -> loop
         Just (EventCharacter 'q') -> return ()
-        Just ev' -> updateWindow w (action ev') >> loop
+        Just EventResized -> screenSize >>= \d -> updateWindow w $ paintJrnl d j
+        Just ev' -> updateWindow w (action ev' j) >> loop
 
-eventer :: Event -> Update Bool
-eventer (EventCharacter c)
-    | c == 'j' = return True -- move Up
-    | c == 'k' = return False -- move down
+eventer :: Event -> Journal -> Update ()
+eventer (EventCharacter c) _
+    | c == 'j' = return () -- move Up
+    | c == 'k' = return () -- move down
+    | otherwise = return ()
+eventer _ _ = return ()
 
 -- Takes journal name and returns journal structure.
 -- Passes to source, then to json parser as a conduit
@@ -108,6 +124,6 @@ journalSource :: String -> Source IO B.ByteString
 journalSource name =
     do
       journalString <- liftIO $ readProcess "jrnl"
-                       [name, "-1", "--export", "json"] ""
+                       [name, "-50", "--export", "json"] ""
       yield $ BSC.pack journalString
       return ()
