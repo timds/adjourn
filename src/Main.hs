@@ -2,8 +2,10 @@
 module Main where
 
 -- NCurses and program arguments
-import UI.NCurses
---import UI.NCurses.Panel
+import UI.HSCurses.Curses as Curses
+import UI.HSCurses.CursesHelper as CursesH
+import UI.HSCurses.Widgets as CursesW
+
 import System.Environment
 import System.Exit
 
@@ -18,24 +20,11 @@ import Data.Conduit as C
 import Data.Aeson
 import qualified Data.ByteString.Lazy as B
 import qualified Data.ByteString.Lazy.Char8 as BSC
+import Adjourn.JournalParse
 
 -- Journal data management
 import qualified Data.Map as Map
 -- Binary tree map, cf HashMap
-
-data Journal = Journal { tags :: Map.Map T.Text Int --[T.Text]
-                       , entries :: [Entry]
-                       } deriving (Show, Generic)
-
-type Title = T.Text
-type Entries = Map.Map Title Entry
-
-data Entry = Entry { body :: T.Text
-                   , starred :: Bool
-                   , date :: T.Text
-                   , title :: T.Text
-                   , time :: T.Text
-                   } deriving (Show, Generic)
 
 instance FromJSON Journal where
     parseJSON (Object v) = Journal <$>
@@ -52,7 +41,7 @@ instance FromJSON Entry where
                            v .: "time"
     parseJSON _          = mzero
 
-type Dim = (Integer, Integer)
+type Dim = (Int, Int)
 
 
 main :: IO ()
@@ -65,8 +54,49 @@ main = do
   --print (date newest) >> print (time newest) >> print (title newest)
   case mjournal of
     Nothing -> exitFailure
-    Just jrnl -> runCurses $ displayJournal jrnl
-  return ()
+    Just jrnl ->
+        do CursesH.start
+           Curses.startColor
+           Curses.echo False
+           w <- Curses.newWin 0 0 0 0
+           (r, c) <- scrSize
+           let rows = map buildRow $ journalTable (c-27) (reverse $ entries jrnl)
+           let tblOpts = defaultTBWOptions
+           let tbl = TableWidget rows 3 (findFirstActiveCell rows tblOpts) tblOpts
+           draw (0,0) (r,c-5) DHNormal tbl
+
+           move 0 0
+           
+           refresh
+           loop
+           CursesH.end
+
+loop :: IO ()
+loop = getKey refresh >>= \k ->
+       case k of
+         KeyChar 'q' -> return ()
+         KeyResize -> refresh >> loop
+         _ -> loop
+                                  
+journalTable :: Int -> [Entry] -> [[String]]
+journalTable n = map (journalRow n)
+
+journalRow :: Int -> Entry -> [String]
+journalRow n e = map T.unpack [(T.pack . show $ dateTime e), T.take n $ title e]
+
+buildRow [d,t,str] = [
+ TableCell $ TextWidget d 0 0 $ defaultTWOptions {twopt_size = TWSizeFixed (1,11)},
+ TableCell $ TextWidget t 0 0 $ defaultTWOptions {twopt_size = TWSizeFixed (1,7)},
+ TableCell $ TextWidget str 0 0 $ defaultTWOptions
+ ]
+
+{-
+drawJournalTable :: Dim -> Journal -> Update ()
+drawJournalTable (rows, cols) j = do
+  let len = min (fromInteger rows) . length $ entries j
+  forM_ (zip [0..len] $ (reverse $ entries j)) $ \(i, e) ->
+      do moveCursor (toInteger i)  0
+         drawText (T.take (fromInteger cols) $ displayTitle e)
 
 -- Print each title in listings
 displayJournal :: Journal -> Curses ()
@@ -77,13 +107,6 @@ displayJournal j = do
   updateWindow w $ paintJrnl dim j
   render
   waitFor w j eventer
-
-paintJrnl :: Dim -> Journal -> Update ()
-paintJrnl (rows, cols) j = do
-  let len = min (fromInteger rows) . length $ entries j
-  forM_ (zip [0..len] $ (reverse $ entries j)) $ \(i, e) ->
-      do moveCursor (toInteger i)  0
-         drawText (T.take (fromInteger cols) $ displayTitle e)
 
 displayTitle :: Entry -> T.Text
 displayTitle e = 
@@ -105,7 +128,7 @@ eventer (EventCharacter c) _
     | c == 'k' = return () -- move down
     | otherwise = return ()
 eventer _ _ = return ()
-
+-}
 -- Takes journal name and returns journal structure.
 -- Passes to source, then to json parser as a conduit
 readJournal :: String -> IO (Maybe Journal)
