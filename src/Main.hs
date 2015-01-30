@@ -15,31 +15,30 @@ import System.Process
 import Control.Applicative
 import Control.Monad
 import Control.Monad.IO.Class (liftIO)
-import qualified Data.Text as T
+import qualified Data.Text.Lazy as T
 import Data.Conduit as C
 import Data.Aeson
 import qualified Data.ByteString.Lazy as B
 import qualified Data.ByteString.Lazy.Char8 as BSC
-import Adjourn.JournalParse
+import Adjourn.Parse
 
 -- Journal data management
 import qualified Data.Map as Map
 -- Binary tree map, cf HashMap
 
-instance FromJSON Journal where
-    parseJSON (Object v) = Journal <$>
-                           v .: "tags" <*>
-                           v .: "entries"
-    parseJSON _          = mzero
+-- instance FromJSON Journal where
+--     parseJSON (Object v) = Journal <$>
+--                            v .: "tags" <*>
+--                            v .: "entries"
+--     parseJSON _          = mzero
 
-instance FromJSON Entry where
-    parseJSON (Object v) = Entry <$>
-                           v .: "body" <*>
-                           v .: "starred" <*>
-                           v .: "date" <*>
-                           v .: "title" <*>
-                           v .: "time"
-    parseJSON _          = mzero
+-- instance FromJSON Entry where
+--     parseJSON (Object v) = Entry <$>
+--                            v .: "body" <*>
+--                            v .: "starred" <*>
+--                            v .: "dateTime" <*>
+--                            v .: "title"
+--     parseJSON _          = mzero
 
 type Dim = (Int, Int)
 
@@ -47,11 +46,16 @@ type Dim = (Int, Int)
 main :: IO ()
 main = do
   args <- getArgs
-  jname <- if length args > 1 then return $ args !! 0 else return "default"
+  print args
+  jname <- if length args > 0 then return $ args !! 0 else return "default"
   putStrLn $ "reading from journal: " ++ jname
-  mjournal <- readJournal jname -- :: IO (Maybe Journal)
+  mjournal <- readJournal jname False
   --let newest = head . entries $ fromJust mjournal
   --print (date newest) >> print (time newest) >> print (title newest)
+  case mjournal of
+   Nothing -> exitFailure
+   Just jrnl -> print $ entries jrnl
+  exitSuccess
   case mjournal of
     Nothing -> exitFailure
     Just jrnl ->
@@ -82,7 +86,7 @@ journalTable :: Int -> [Entry] -> [[String]]
 journalTable n = map (journalRow n)
 
 journalRow :: Int -> Entry -> [String]
-journalRow n e = map T.unpack [(T.pack . show $ dateTime e), T.take n $ title e]
+journalRow n e = map T.unpack [(T.pack . show $ dateTime e), T.take (fromIntegral n) $ title e]
 
 buildRow [d,t,str] = [
  TableCell $ TextWidget d 0 0 $ defaultTWOptions {twopt_size = TWSizeFixed (1,11)},
@@ -131,22 +135,22 @@ eventer _ _ = return ()
 -}
 -- Takes journal name and returns journal structure.
 -- Passes to source, then to json parser as a conduit
-readJournal :: String -> IO (Maybe Journal)
-readJournal n = journalSource n $$ parseJournal $= await >>= return
+-- readJournal :: String -> IO (Maybe Journal)
+-- readJournal n = journalSource n $$ parseJournal $= await >>= return
 
-parseJournal :: Conduit B.ByteString IO Journal
-parseJournal =
-    awaitForever $ \jobj ->
-        do
-          let parsed = decode jobj :: Maybe Journal
-          case parsed of
-            Nothing -> liftIO $ putStrLn "json not decoded" >> return ()
-            Just jrn -> yield jrn >> return ()
+-- parseJournal :: Conduit B.ByteString IO Journal
+-- parseJournal =
+--     awaitForever $ \jobj ->
+--         do
+--           let parsed = decode jobj :: Maybe Journal
+--           case parsed of
+--             Nothing -> liftIO $ putStrLn "json not decoded" >> return ()
+--             Just jrn -> yield jrn >> return ()
 
-journalSource :: String -> Source IO B.ByteString
-journalSource name =
-    do
-      journalString <- liftIO $ readProcess "jrnl"
-                       [name, "-50", "--export", "json"] ""
-      yield $ BSC.pack journalString
-      return ()
+-- journalSource :: String -> Source IO B.ByteString
+-- journalSource name =
+--     do
+--       journalString <- liftIO $ readProcess "jrnl"
+--                        [name, "-50", "--export", "json"] ""
+--       yield $ BSC.pack journalString
+--       return ()
