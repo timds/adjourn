@@ -1,4 +1,4 @@
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE OverloadedStrings, BangPatterns #-}
 
 module Adjourn.Parse(
   Entry(..), Journal(..), readJournal
@@ -40,7 +40,7 @@ parseJournal t =
     len = length lns
     (_, _, allEntries) = foldl' (go len) (blank, "", []) $ zip [1,2..] lns
   in return $ Journal Map.empty (init allEntries)
-  where go end (entry, bodyS, entries0) (i, line) =
+  where go end (!entry, !bodyS, !entries0) (i, line) =
           case parse parseDate line of
              Fail _ _ _ ->
                let b = (withNewline bodyS) `T.append` line
