@@ -72,26 +72,25 @@ mkEntriesList = do
   sz <- gets size
   jrnl <- ask
   let rowData = map (entryToList sz) $ entries jrnl
-      rows = map mkRow' $ alignRows rowData ' ' "  "
+      rows = map (mkRow' (snd sz)) $ alignRows rowData ' ' "  "
       tblOpts = defaultTBWOptions { tbwopt_activeCols = [0] }
   return $ newTableWidget tblOpts rows
 
--- TODO: need to get length of longest title when trimming both title and body
-entryToList :: CursesW.Size -> Entry -> [String]
+-- TODO: Get some fraction of the screen to use as max title length.
+entryToList :: Size -> Entry -> [String]
 entryToList (_, c) e =
-  let offsetLen = 3
-      offset = concat . take offsetLen $ repeat " "
-      time = (show $ dateTime e)
+  let time = (show $ dateTime e)
       lenTime = length time
-      title' = take (min (c - lenTime - 1) 40) $ offset ++ T.unpack (title e)
-      len = fromIntegral $ offsetLen + lenTime + length title'
-      trim = fromIntegral $ max 0 $ c - len
-      body' = (++) offset .  T.unpack . T.take trim .
+      title' = take (c - lenTime - 1) $ T.unpack (title e)
+      len = fromIntegral $ lenTime + length title'
+      trimNum = fromIntegral $ max 0 $ c - len
+      body' = T.unpack . T.take trimNum .
               T.takeWhile (/= '\n') $ body e
       in [time, title', body']
 
-mkRow' :: String -> Row
-mkRow' s = singletonRow . TableCell $ newTextWidget defaultTWOptions s
+mkRow' :: Int -> String -> Row
+mkRow' width s = singletonRow . TableCell $ newTextWidget
+                 defaultTWOptions { twopt_size = TWSizeFixed (1, width-1)} s
 
 mkRow :: [String] -> Row
 mkRow [s] = singletonRow . TableCell $ newTextWidget defaultTWOptions s
@@ -103,25 +102,35 @@ mkRow [d,t,str] = [
  TableCell $ newTextWidget defaultTWOptions str
  ]
 
+resize :: Adj ()
+resize = do
+  oldSz@(c,r) <- gets size
+  newSz@(c',r') <- liftIO $ do
+    Curses.endWin
+    Curses.refresh
+    Curses.erase
+    Curses.scrSize
+  liftIO $ Curses.resizeTerminal c' r'
+  get >>= \st -> put $ st { size = newSz }
+
 redraw :: Widget w => w -> Adj ()
 redraw w = do
   st <- get
-  let active = row st
-      (r,c)  = size st
+  let (r,c) = size st
   liftIO Curses.scrSize >>= \sz -> put st { size = sz }
-  liftIO $ CursesW.draw (0,0) (r-1,c-1) DHNormal w
+  liftIO $ CursesW.draw (0,0) (r-1,c) DHNormal w
   liftIO Curses.refresh
 
 loop :: TableWidget -> Adj ()
-loop w = liftIO (getKey refresh) >>= \k ->
+loop w = liftIO Curses.getCh >>= \k ->
        case k of
+         KeyResize -> resize >> mkEntriesList >>= \w' -> redraw w' >> loop w'
          KeyChar 'q' -> return ()
-         c | c `elem` [KeyChar 'j', KeyDown] -> go w $ moveRow DirDown
-         c | c `elem` [KeyChar 'k', KeyUp] -> go w $ moveRow DirUp
-         KeyResize -> redraw w >> loop w
-         _ -> redraw w >> loop w
-  where go w f = do
-          w' <- f w
+         c | c `elem` [KeyChar 'j', KeyDown] -> go $ moveRow DirDown w
+         c | c `elem` [KeyChar 'k', KeyUp] -> go $ moveRow DirUp w
+         _ -> redraw w
+  where go f = do
+          w' <- f
           redraw w'
           loop w'
 
