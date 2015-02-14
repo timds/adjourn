@@ -1,4 +1,3 @@
-{-# LANGUAGE CPP #-}
 module Main where
 
 import Control.Exception (finally)
@@ -13,30 +12,7 @@ import System.Exit
 
 import qualified Data.Text.Lazy as T
 import Adjourn.Parse
-
-#ifdef __DEBUG__
-import System.IO.Unsafe (unsafePerformIO)
-import System.IO
-logFile :: Handle
-logFile = unsafePerformIO $ do h <- openFile ".hscurses.log" AppendMode
-                               debug_ h "logging initialized"
-                               return h
-trace s x =
-    unsafePerformIO $ do debug s
-                         return x
-
-debug s = debug_ logFile s
-
-debug_ f s =
-    do hPutStrLn f ("["++ "] " ++ s)
-       hFlush f
-
-isDebug = print "debug mode on"
-#else
-debug = return () :: IO ()
-trace _ x = x
-isDebug = return ()
-#endif
+import Adjourn.Debug
 
 data AdjState = AdjState { size :: Size, row :: Int }
 type Adj = ReaderT Journal (StateT AdjState IO)

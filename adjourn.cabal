@@ -57,7 +57,7 @@ executable adjourn
     cpp-options:  -D__DEBUG__
   
   -- Modules included in this executable, other than Main.
-  other-modules:       Adjourn.Parse
+  other-modules:       Adjourn.Parse, Adjourn.Debug
 
   build-depends:       base >=4.6 && <5, containers, time, attoparsec,
                        text, mtl, hscurses >= 1.4
