@@ -13,6 +13,7 @@ import Data.List (foldl')
 
 data Journal = Journal { tags :: Map.Map T.Text Int
                        , entries :: [Entry]
+                       , entriesLength :: Int
                        } deriving Show
 data Entry = Entry { body :: T.Text
                    , starred :: Bool
@@ -38,8 +39,9 @@ parseJournal t =
   let
     lns = T.lines t
     len = length lns
-    (_, _, allEntries) = foldl' (go len) (blank, "", []) $ zip [1,2..] lns
-  in return $ Journal Map.empty (init allEntries)
+    (_, _, allEntries') = foldl' (go len) (blank, "", []) $ zip [1,2..] lns
+    allEntries = init allEntries' -- TODO: fix the bug to remove init call
+  in return $ Journal Map.empty allEntries (length allEntries)
   where go end (!entry, !bodyS, !entries0) (i, line) =
           case parse parseDate line of
              Fail _ _ _ ->
