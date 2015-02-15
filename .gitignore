@@ -2,5 +2,8 @@
 *.o
 dist/
 .cabal-sandbox/
+.hscurses.log
 /cabal.sandbox.config
-/.DS_Store
+.DS_Store
+run
+adjourn.prof
