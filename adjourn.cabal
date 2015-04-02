@@ -59,8 +59,16 @@ executable adjourn
   -- Modules included in this executable, other than Main.
   other-modules:       Adjourn.Parse, Adjourn.Debug
 
-  build-depends:       base >=4.6 && <5, containers, time, attoparsec,
-                       text, mtl, hscurses >= 1.4
+  build-depends:       attoparsec
+                     , base >=4.6 && <5
+                     , bytestring
+                     , containers
+                     , cryptocipher
+                     , cryptohash
+                     , hscurses >= 1.4
+                     , mtl
+                     , text
+                     , time
 
   hs-source-dirs: src
 

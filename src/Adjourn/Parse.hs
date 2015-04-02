@@ -4,12 +4,17 @@ module Adjourn.Parse(
   Entry(..), Journal(..), readJournal
 ) where
 
-import qualified Data.Text.Lazy as T hiding (count)
-import qualified Data.Text.Lazy.IO as IO
-import Data.Attoparsec.Text.Lazy
-import Data.Time
-import qualified Data.Map.Strict as Map
+import Crypto.Cipher
+import Crypto.Hash.SHA256 as SHA256 (hash)
+import Data.Attoparsec.Text
+import qualified Data.ByteString as BS
 import Data.List (foldl')
+import qualified Data.Map.Strict as Map
+import qualified Data.Text as T
+import Data.Text.Encoding (decodeUtf8)
+import qualified Data.Text.IO as TIO
+import Data.Time
+import System.IO
 
 data Journal = Journal { tags :: Map.Map T.Text Int
                        , entries :: [Entry]
@@ -29,10 +34,35 @@ test = readJournal "example.txt" False >>= \mj -> case mj of
   Nothing -> return ["jrnl not parsed"]
 
 readJournal :: FilePath -> Bool -> IO (Maybe Journal)
-readJournal f isEncrypted =
-  IO.readFile f
-  >>= \t -> (if isEncrypted then decrypt t else return t)
-  >>= return . parseJournal
+readJournal f isEncrypted = do
+  text <- if isEncrypted then
+            do
+              password <- askPassword
+              bytes <- BS.readFile f
+              return $ decrypt password bytes
+          else TIO.readFile f
+  return $ parseJournal text
+
+askPassword :: IO BS.ByteString
+askPassword = do
+  putStr "Password: " >> hFlush stdout
+  old <- hGetEcho stdin
+  hSetEcho stdin False
+  txt <- BS.getLine
+  hSetEcho stdin old
+  putChar '\n'
+  return txt
+
+-- Decrypt using AES256 in CBC.
+-- Key is SHA-256 of password
+-- the IV is the first 16 bytes of the file
+decrypt :: BS.ByteString -> BS.ByteString -> T.Text
+decrypt pw txt =
+  let hashed = SHA256.hash pw
+      (ivRaw, jrnl) = BS.splitAt 16 txt
+      cipher = either (error . show) cipherInit $ (makeKey hashed) :: AES256
+      iv = maybe (error "Could not decrypt: invalid IV") id $ makeIV ivRaw :: IV AES256
+  in T.init . decodeUtf8 $ cbcDecrypt cipher iv jrnl
 
 parseJournal :: T.Text -> Maybe Journal
 parseJournal t =
@@ -50,12 +80,10 @@ parseJournal t =
                    entries1 = if i == end then e : entries0 else entries0
                in (entry, b, entries1)
              Done titleText date ->
-               (Entry "" False date (T.tail titleText), "", 
+               (Entry "" False date (T.tail titleText), "",
                 (entry { body = bodyS }) : entries0)
+             x -> (entry, bodyS, entries0)
         withNewline b = if T.null b then b else b `T.append` "\n"
-
-decrypt :: T.Text -> IO T.Text
-decrypt = return
 
 parseDate :: Parser LocalTime
 parseDate = do

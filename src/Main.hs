@@ -11,7 +11,7 @@ import UI.HSCurses.Widgets as CursesW
 import System.Environment
 import System.Exit
 
-import qualified Data.Text.Lazy as T
+import qualified Data.Text as T
 import Adjourn.Parse
 import Adjourn.Debug
 
@@ -152,10 +152,11 @@ main :: IO ()
 main = do
   args <- getArgs
   isDebug
-  jname <- if length args > 0 then return $ args !! 0 else return "default"
-  mjournal <- readJournal jname False
+  let jname = if length args > 0 then args !! 0 else "default"
+      encrypted = if length args > 1 then (args !! 1) == "--decrypt" || (args !! 1) == "-d" else False
+  mjournal <- readJournal jname encrypted
   case mjournal of
-    Nothing -> exitFailure
+    Nothing -> putStrLn "usage: adj jrnlfile [isencrypted]" >> exitFailure
     Just jrnl -> startUI jrnl `finally` CursesH.end
   where startUI jrnl = do
           CursesH.start
