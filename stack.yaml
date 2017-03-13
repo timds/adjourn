@@ -1,4 +1,4 @@
-resolver: lts-7.19
+resolver: lts-8.5
 
 extra-deps:
 - hscurses-1.4.2.0
