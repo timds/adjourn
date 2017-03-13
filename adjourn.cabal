@@ -7,30 +7,41 @@ license-file:        LICENSE
 author:              timds
 maintainer:          timds_pub@icloud.com
 copyright:           2017 timds
--- category:            
 build-type:          Simple
 extra-source-files:  README.md
 cabal-version:       >=1.10
-data-files: example.txt
+data-files:          example.txt
 
 flag debug
   description: Enable debug logging
   default:     False
 
-executable adjourn
+library
   hs-source-dirs:      src
-  main-is:             Main.hs
-  default-language:    Haskell2010
   if flag(debug)
     cpp-options:  -D__DEBUG__
-  other-modules:       Adjourn.Parse, Adjourn.Debug
-  build-depends:       attoparsec
-                     , base >=4.6 && <5
+  exposed-modules:     Adjourn.Parse
+                     , Adjourn.Debug
+  build-depends:       base >= 4.7 && < 5
+                     , attoparsec
                      , bytestring
                      , containers
                      , cryptocipher
                      , cryptohash
-                     , hscurses >= 1.4
                      , mtl
                      , text
                      , time
+                     , hscurses >= 1.4
+  default-language:    Haskell2010
+
+executable adj
+  hs-source-dirs:      app
+  main-is:             Main.hs
+  default-language:    Haskell2010
+  if flag(debug)
+    cpp-options:  -D__DEBUG__
+  build-depends:       base >=4.7 && <5
+                     , text
+                     , mtl
+                     , hscurses >= 1.4
+                     , adjourn
