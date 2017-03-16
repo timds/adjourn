@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Main where
 
-import           Adjourn.Parse
+import           Adjrn.Parse
 import           Brick.AttrMap
 import           Brick.Main
 import           Brick.Types
@@ -24,11 +24,11 @@ main = do
   (jname, encrypted) <- do
     args <- getArgs
     case args of
-      [j, opt] | opt == "-d" || opt == "--decrypt" -> return (j,True)
+      [j, opt] | opt == "--decrypt" || opt == "-d" -> return (j,True)
       [j] -> return (j,False)
       [] -> return ("default", False)
       _  -> do
-        putStrLn "usage: adj path/to/journal [-d | --decrypt]"
+        putStrLn "Usage: adjrn journal_file [--decrypt | -d]"
         exitFailure
   mjournal <- readJournal jname encrypted
   case mjournal of

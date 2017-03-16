@@ -1,11 +1,22 @@
-# Adjourn
+# Adjrn
 
-Adjourn is an ncurses-based interface to [jrnl](http://maebert.github.io/jrnl/).
+Adjrn is a terminal viewer of [jrnl](http://maebert.github.io/jrnl/) files.
 
-The functionality is incomplete. You can however view a journal in a
-basic way with `adjourn path/to/jrnl.txt [--decrypt]`.
+## Install
 
-To install:
-- Download & install stack from https://github.com/commercialhaskell/stack
-- Clone this repo
-- Run `stack build` and then `stack install`
+- Install `stack` from https://haskellstack.org or your package manager.
+- Clone this repo: `git clone https://github.com/timds/adjourn.git`
+- Run `stack install` inside the adjrn directory to install to `~/.local/bin`. 
+  You may move this executable to another location.
+
+## Usage
+
+`adjrn filepath` views a regular, plain text journal.
+
+`adjrn filepath [--decrypt | -d]` views an encrypted journal.
+
+## To do
+
+* Allow specifying journal name only
+* Handle alternative date formats
+* Searching and filtering

@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedStrings, BangPatterns #-}
 
-module Adjourn.Parse(
+module Adjrn.Parse(
   Entry(..), Journal(..), readJournal
 ) where
 
