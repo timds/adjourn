@@ -1,169 +1,175 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Main where
 
-import Control.Exception (finally)
-import Control.Monad.State.Strict
-import Control.Monad.Reader
-import UI.HSCurses.Curses as Curses
-import UI.HSCurses.CursesHelper as CursesH
-import UI.HSCurses.Widgets as CursesW
-
-import System.Environment
-import System.Exit
-
+import           Adjourn.Parse
+import           Brick.AttrMap
+import           Brick.Main
+import           Brick.Types
+import           Brick.Util
+import           Brick.Widgets.Border
+import           Brick.Widgets.Core
+import           Brick.Widgets.List
+import           Data.List (foldl')
+import qualified Data.Map as M
+import           Data.Monoid ((<>))
+import           Data.Text (Text)
 import qualified Data.Text as T
-import Adjourn.Parse
-import Adjourn.Debug
-
-data MainWidget = MainWidget
-                  { entryList :: TableWidget
-                  , entryView :: Maybe TextWidget
-                  }
-
-instance Widget MainWidget where
-  draw pos sz drawHint w = draw pos sz drawHint $ flattenMainWidget (Just sz) w
-  minSize w = minSize $ flattenMainWidget Nothing w
-
-data AdjState = AdjState { size :: Size
-                         , row :: Int
-                         , entryIdx :: Int
-                         , entryIsShown :: Bool
-                         }
-
-type Adj = ReaderT Journal (StateT AdjState IO)
-
-adjMain :: Adj ()
-adjMain = do
-  es <- mkEntriesList
-  let w = MainWidget es Nothing
-  redraw w
-  loop w
-
-flattenMainWidget :: Maybe Size -> MainWidget -> TableWidget
-flattenMainWidget mSz w =
-  let eView = maybe (TableCell blankEntryView) TableCell (entryView w)
-      cells = [TableCell $ entryList w, eView]
-      rows = map (:[]) cells
-      opts = case mSz of
-              Just sz -> defaultTBWOptions { tbwopt_minSize = sz }
-              _ -> defaultTBWOptions --{ tbwopt_minSize = min $ map minSize cells }
-  in newTableWidget opts rows
-
-blankEntryView :: TableWidget
-blankEntryView = let opts = defaultTBWOptions { tbwopt_minSize = (0,0) }
-                 in newTableWidget opts [[TableCell $ EmptyWidget (0,0)]]
-
-mkEntryViewWidget :: Adj TextWidget
-mkEntryViewWidget = do
-  idx <- gets entryIdx
-  (r,c) <- gets size
-  es <- asks entries
-  let text = T.unpack . mkText $ es !! idx
-      opts = defaultTWOptions { twopt_size = TWSizeFixed (r `div` 2 - 4, c-1) }
-  return $ newTextWidget opts text
-    where mkText e = T.intercalate "\n" [(title e), (body e)]
-
-
-mkEntriesList :: Adj TableWidget
-mkEntriesList = do
-  sz@(r,c) <- gets size
-  jrnl <- ask
-  let height = r `div` 2
-      rowData = map (entryToList c) $ entries jrnl
-      rows = map (mkRow' (snd sz)) $ alignRows rowData ' ' "  "
-      --NB: minSize must be <= r-2 and c-1 or else prog crashes on resize
-      tblOpts = defaultTBWOptions { tbwopt_minSize = (height - 4, c-1)
-                                  , tbwopt_activeCols = [0] }
-  return $ newTableWidget tblOpts rows
-
--- TODO: Get some fraction of the screen to use as max title length.
-entryToList :: Int -> Entry -> [String]
-entryToList cols e =
-  let time = (show $ dateTime e)
-      lenTime = length time
-      title' = take (cols - lenTime - 1) $ T.unpack (title e)
-      len = fromIntegral $ lenTime + length title'
-      trimNum = fromIntegral $ max 0 $ cols - len
-      body' = T.unpack . T.take trimNum .
-              T.takeWhile (/= '\n') $ body e
-      in [time, title', body']
-
-
-mkRow' :: Int -> String -> Row
-mkRow' width s = singletonRow . TableCell $ newTextWidget
-               defaultTWOptions { twopt_size = TWSizeFixed (1, width-1)} s
-
-resize :: Adj ()
-resize = do
-  newSz@(c',r') <- liftIO $ do
-    Curses.endWin
-    Curses.refresh
-    Curses.erase
-    Curses.scrSize
-  liftIO $ Curses.resizeTerminal c' r'
-  get >>= \st -> put $ st { size = newSz }
-
-redraw :: MainWidget -> Adj ()
-redraw w = do
-  st <- get
-  let (r,c) = size st
-  liftIO Curses.scrSize >>= \sz -> put st { size = sz }
-  -- liftIO $ debug ("redrawing with (rows, col) = " ++ show (r - 1) ++ ", " ++ show c)
-  -- let w' = w { tbw_options = (tbw_options w) { tbwopt_minSize = (r,c) }}
-  eView <- if entryIsShown st then fmap Just mkEntryViewWidget else return Nothing
-  liftIO $ CursesW.draw (0,0) (r-1,c) DHNormal $ w { entryView = eView }
-  liftIO Curses.refresh
-
-moveRow :: Direction -> MainWidget -> Adj MainWidget
-moveRow dir w = do
-  AdjState sz r idx b <- get
-  lastIdx <- asks (subtract 1 . entriesLength)
-  let idx' = case dir of
-              DirDown -> min (lastIdx) (idx + 1)
-              DirUp -> max 0 (idx - 1)
-              _ -> idx
-  put $ AdjState sz r idx' b
-  return $ w { entryList = tableWidgetMove dir sz (entryList w) }
-
-toggleEntryView :: MainWidget -> Adj MainWidget
-toggleEntryView w = do
-  st <- get
-  put $ st { entryIsShown = not (entryIsShown st) }
-  return w
-
-loop :: MainWidget -> Adj ()
-loop w = liftIO Curses.getCh >>= \k ->
-       case k of
-         KeyResize -> do resize
-                         es <- mkEntriesList
-                         let w' = w { entryList = es }
-                         redraw w' >> loop w'
-         c | c `elem` [KeyEnter, KeyChar '\n', KeyChar '\r'] -> go $ toggleEntryView w
-         c | c `elem` [KeyChar 'j', KeyDown] -> go $ moveRow DirDown w
-         c | c `elem` [KeyChar 'k', KeyUp] -> go $ moveRow DirUp w
-         KeyChar 'q' -> return ()
-         _ -> loop w
-  where go f = do
-          w' <- f
-          redraw w'
-          loop w'
+import qualified Data.Vector as Vec
+import           Graphics.Vty as V
+import           System.Environment (getArgs)
+import           System.Exit (exitFailure, exitSuccess)
 
 main :: IO ()
 main = do
-  args <- getArgs
-  isDebug
-  let jname = if length args > 0 then args !! 0 else "default"
-      encrypted = if length args > 1 then (args !! 1) == "--decrypt" || (args !! 1) == "-d" else False
+  (jname, encrypted) <- do
+    args <- getArgs
+    case args of
+      [j, opt] | opt == "-d" || opt == "--decrypt" -> return (j,True)
+      [j] -> return (j,False)
+      [] -> return ("default", False)
+      _  -> do
+        putStrLn "usage: adj path/to/journal [-d | --decrypt]"
+        exitFailure
   mjournal <- readJournal jname encrypted
   case mjournal of
-    Nothing -> putStrLn "usage: adj jrnlfile [isencrypted]" >> exitFailure
-    Just jrnl -> startUI jrnl `finally` CursesH.end
-  where startUI jrnl = do
-          CursesH.start
-          Curses.startColor
-          Curses.echo False
-          Curses.raw True -- raw and nonl (aka nl False) enable KeyEnter
-          Curses.nl False
-          Curses.cursSet Curses.CursorInvisible
-          sz <- Curses.scrSize
-          evalStateT (runReaderT adjMain jrnl) $ AdjState sz 0 0 False
+    Just journal -> do
+      defaultMain app (AdjState (jList journal) (tags journal) False)
+      exitSuccess
+    Nothing -> do
+      putStrLn "Error parsing journal"
+      exitFailure
+
+data Window = MainW | ListW | BodyVP
+  deriving (Show,Eq,Ord)
+
+data AdjState = AdjState
+  { jrnl :: List Window Entry
+  , tagMap :: M.Map T.Text Int
+  , entryOpen :: Bool
+  } deriving Show
+
+app :: App AdjState () Window
+app = App
+  { appDraw = pure . drawAll
+  , appChooseCursor = neverShowCursor
+  , appHandleEvent = handleEvent
+  , appStartEvent = return
+  , appAttrMap = const $ attrMap V.defAttr jrnlAttrs }
+
+jrnlAttrs :: [(AttrName, Attr)]
+jrnlAttrs =
+  [ (listSelectedFocusedAttr,
+     white `on` green `withStyle` bold)
+  , (attrName "def", defAttr)
+  , (starAttr, defAttr `withForeColor` yellow `withStyle` bold)
+  , (dateAttr, defAttr `withForeColor` blue)
+  ]
+
+starAttr :: AttrName
+starAttr = attrName "star"
+
+dateAttr :: AttrName
+dateAttr = attrName "date"
+
+handleEvent :: AdjState -> BrickEvent Window ()
+            -> EventM Window (Next AdjState)
+handleEvent s e = case e of
+  VtyEvent (V.EvKey (V.KChar 'q') []) ->
+    if entryOpen s
+    then continue $ s { entryOpen = not (entryOpen s) }
+    else halt s
+  VtyEvent (V.EvKey V.KEnter [])->
+    continue $ s { entryOpen = not (entryOpen s) }
+  VtyEvent (V.EvKey (V.KChar 'j') []) -> do
+    if entryOpen s
+      then do
+        let vp = viewportScroll BodyVP
+        vScrollBy vp 1
+        continue s
+      else do
+        newL <- handleListEvent (V.EvKey V.KDown []) (jrnl s)
+        continue $ s { jrnl = newL }
+  VtyEvent (V.EvKey (V.KChar 'k') []) -> do
+    if entryOpen s
+      then do
+        let vp = viewportScroll BodyVP
+        vScrollBy vp (-1)
+        continue s
+      else do
+        newL <- handleListEvent (V.EvKey V.KUp []) (jrnl s)
+        continue $ s { jrnl = newL }
+  VtyEvent ev -> do
+    newList <- handleListEvent ev (jrnl s)
+    continue (s { jrnl = newList})
+  _ -> continue s
+
+jList :: Journal -> List Window Entry
+jList j = let entriesVec = Vec.fromList (entries j)
+          in list ListW entriesVec 1
+
+drawEntryListItem :: Bool -> Entry -> Widget Window
+drawEntryListItem selected (Entry _ star date t) =
+  withPad (withAttr dateAttr' (str (show date)))
+  <+> withPad (withAttr starAttr' (str (showStar star)))
+  <+> txt t
+  where showStar True = "*"
+        showStar False = " "
+        dateAttr' = if not selected then dateAttr else mempty
+        starAttr' = if not selected then starAttr else mempty
+        withPad = padRight (Pad 1)
+
+-- run naive greedy algorithm on spaces as the only splitter
+wrapText :: Int -> Text -> [Text]
+wrapText width t = T.lines t >>= \ln -> do
+  case textWidth ln of
+    w | w <= width -> [ln]
+    w | w > width -> wrapLine width ln ++ [" "]
+
+-- Wraps text assuming there are no new lines.
+wrapLine :: Int -> Text -> [Text]
+wrapLine width line =
+  let (_,res,lastLine) =
+        foldl' go (width,[],[]) $
+        T.chunksOf width =<< T.words line
+  in res ++ [T.unwords lastLine]
+  where
+    spaceWidth = textWidth (" " :: Text)
+    go (spaceLeft, lns, currentLine) word
+      | wordWidth > spaceLeft =
+          ( width - wordWidth
+          , lns ++ [T.unwords currentLine]
+          , T.chunksOf width word)
+      | otherwise =
+          (spaceLeft - (wordWidth + spaceWidth),
+           lns,
+           currentLine ++ T.chunksOf width word)
+      where wordWidth = textWidth word
+
+entryText :: Entry -> Text
+entryText (Entry b s d t) = T.unlines
+  [ "Date:  " <> T.pack (show d)
+  , "Title: " <> star <> t
+  , " "
+  , b
+  ]
+  where star = if s then "* " else ""
+
+drawAll :: AdjState -> Widget Window
+drawAll (AdjState lst _ isOpen)
+  | not isOpen = listW
+  | isOpen = listW
+             <=> hBorder
+             <=> bodyW lst
+    where listW = renderList drawEntryListItem True lst
+
+bodyW :: List Window Entry -> Widget Window
+bodyW lst =
+  viewport BodyVP Vertical $
+  Widget Greedy Fixed $ do
+    ctx <- getContext
+    let width = availWidth ctx
+        bodyText = maybe "" (entryText . snd) $
+                   listSelectedElement lst
+        bodyLines = wrapText (width - 1) bodyText
+    render . vLimit (length bodyLines) .
+      vBox $ map txt bodyLines
