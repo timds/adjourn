@@ -7,6 +7,7 @@ module Adjrn.Parse(
 import Crypto.Cipher
 import Crypto.Hash.SHA256 as SHA256 (hash)
 import Data.Attoparsec.Text
+import           Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
 import Data.List (foldl')
 import qualified Data.Map.Strict as Map
@@ -26,37 +27,15 @@ data Entry = Entry { body :: T.Text
                    , title :: T.Text
                    } deriving Show
 
-blank :: Entry
-blank = Entry "" False (LocalTime (ModifiedJulianDay 1) (TimeOfDay 1 1 1)) ""
-
-test = readJournal "example.txt" False >>= \mj -> case mj of
-  Just j -> return $ map show (entries j)
-  Nothing -> return ["jrnl not parsed"]
-
-readJournal :: FilePath -> Bool -> IO (Maybe Journal)
-readJournal f isEncrypted = do
-  text <- if isEncrypted then
-            do
-              password <- askPassword
-              bytes <- BS.readFile f
-              return $ decrypt password bytes
-          else TIO.readFile f
-  return $ parseJournal text
-
-askPassword :: IO BS.ByteString
-askPassword = do
-  putStr "Password: " >> hFlush stdout
-  old <- hGetEcho stdin
-  hSetEcho stdin False
-  txt <- BS.getLine
-  hSetEcho stdin old
-  putChar '\n'
-  return txt
+readJournal :: FilePath -> Maybe ByteString -> IO (Maybe Journal)
+readJournal f Nothing = parseJournal <$> TIO.readFile f
+readJournal f (Just pw) =
+  parseJournal . decrypt pw <$> BS.readFile f
 
 -- Decrypt using AES256 in CBC.
 -- Key is SHA-256 of password
 -- the IV is the first 16 bytes of the file
-decrypt :: BS.ByteString -> BS.ByteString -> T.Text
+decrypt :: ByteString -> ByteString -> Text
 decrypt pw txt =
   let hashed = SHA256.hash pw
       (ivRaw, jrnl) = BS.splitAt 16 txt
