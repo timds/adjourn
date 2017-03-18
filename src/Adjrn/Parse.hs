@@ -1,36 +1,48 @@
-{-# LANGUAGE OverloadedStrings, BangPatterns #-}
+{-# LANGUAGE TupleSections #-}
+{-# LANGUAGE OverloadedStrings #-}
 
-module Adjrn.Parse(
-  Entry(..), Journal(..), readJournal
-) where
+module Adjrn.Parse
+  ( Entry(..)
+  , Journal(..)
+  , readJournal
+  , parseJournal
+  )
+where
 
-import Crypto.Cipher
-import Crypto.Hash.SHA256 as SHA256 (hash)
-import Data.Attoparsec.Text
+import           Control.Applicative ((<|>))
+import           Crypto.Cipher
+import           Crypto.Hash.SHA256 as SHA256 (hash)
+import           Data.Attoparsec.Text as P
 import           Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
-import Data.List (foldl')
-import qualified Data.Map.Strict as Map
+import           Data.Either (isLeft, isRight, partitionEithers)
+import           Data.Foldable
+import           Data.List (foldl', groupBy)
+import           Data.Map (Map)
+import qualified Data.Map as M
+import           Data.Monoid ((<>))
+import           Data.Text (Text)
 import qualified Data.Text as T
-import Data.Text.Encoding (decodeUtf8)
+import           Data.Text.Encoding (decodeUtf8)
 import qualified Data.Text.IO as TIO
-import Data.Time
-import System.IO
+import           Data.Time
+import           System.IO
 
-data Journal = Journal { tags :: Map.Map T.Text Int
-                       , entries :: [Entry]
-                       , entriesLength :: Int
-                       } deriving Show
-data Entry = Entry { body :: T.Text
-                   , starred :: Bool
-                   , dateTime :: LocalTime
-                   , title :: T.Text
-                   } deriving Show
+data Journal = Journal
+  { tags :: Map Text Int
+  , entries :: [Entry]
+  } deriving (Show, Eq)
 
-readJournal :: FilePath -> Maybe ByteString -> IO (Maybe Journal)
-readJournal f Nothing = parseJournal <$> TIO.readFile f
-readJournal f (Just pw) =
-  parseJournal . decrypt pw <$> BS.readFile f
+data Entry = Entry
+  { body :: Text
+  , starred :: Bool
+  , dateTime :: LocalTime
+  , title :: Text
+  } deriving (Show, Eq)
+
+readJournal :: FilePath -> Maybe ByteString -> IO (Either String Journal)
+readJournal f Nothing = parseOnly parseJournal <$> TIO.readFile f
+readJournal f (Just pw) = parseOnly parseJournal . decrypt pw <$> BS.readFile f
 
 -- Decrypt using AES256 in CBC.
 -- Key is SHA-256 of password
@@ -43,27 +55,46 @@ decrypt pw txt =
       iv = maybe (error "Could not decrypt: invalid IV") id $ makeIV ivRaw :: IV AES256
   in T.init . decodeUtf8 $ cbcDecrypt cipher iv jrnl
 
-parseJournal :: T.Text -> Maybe Journal
-parseJournal t =
-  let
-    lns = T.lines t
-    len = length lns
-    (_, _, allEntries') = foldl' (go len) (blank, "", []) $ zip [1,2..] lns
-    allEntries = init allEntries' -- TODO: fix the bug to remove init call
-  in return $ Journal Map.empty allEntries (length allEntries)
-  where go end (!entry, !bodyS, !entries0) (i, line) =
-          case parse parseDate line of
-             Fail _ _ _ ->
-               let b = (withNewline bodyS) `T.append` line
-                   e = entry{body=b}
-                   entries1 = if i == end then e : entries0 else entries0
-               in (entry, b, entries1)
-             Done titleText date ->
-               (Entry "" False date (T.tail titleText), "",
-                (entry { body = bodyS }) : entries0)
-             x -> (entry, bodyS, entries0)
-        withNewline b = if T.null b then b else b `T.append` "\n"
+parseJournal :: Parser Journal
+parseJournal = do
+  skipWhile (\c -> isHorizontalSpace c || isEndOfLine c)
+  es <- many' $ (Left <$> parseDate <* space)
+        <|> (Right <$> parseLine)
+  case toJournal <$> toEntries es of
+    Left e -> fail e
+    Right r -> return r
 
+parseLine :: Parser Text
+parseLine = do
+  ln <- P.takeWhile (/= '\n')
+  char '\n'
+  return $ T.append ln "\n"
+
+toEntries :: [Either LocalTime Text] -> Either String [(LocalTime, Text)]
+toEntries es = (\xs -> maybe xs  (:xs) ((,lastBody) <$> lastDate)) <$> res
+  where
+    (res,lastDate,lastBody) = foldl' go (Right [], Nothing, "") es
+    lastPair (Just date) body = Just (date,body)
+    lastPair Nothing _ = Nothing
+    go (res, Nothing, b) (Left dt) =
+      (res, Just dt, b)
+
+    go (Right res, Just lastDate, body) (Left dt) =
+      (Right $ (lastDate, body) : res, Just dt, "")
+
+    go (res, Just dt, body) (Right t) =
+      (res, Just dt, body <> t)
+
+    go (res,Nothing,b) (Right _) = (Left "No date for text", Nothing, b)
+
+toJournal :: [(LocalTime, Text)] -> Journal
+toJournal lst = Journal M.empty es
+  where es = map go lst
+        go (dt, txt) =
+          let title' = T.takeWhile (\c -> c /= '\n' && c /= '.') txt
+          in Entry txt False dt title'
+
+--TODO: different date formats. use time library's parsing if possible
 parseDate :: Parser LocalTime
 parseDate = do
   y <- count 4 digit

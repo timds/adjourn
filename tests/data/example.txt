@@ -1,0 +1,22 @@
+2013-04-09 15:39 This is adjrn
+* It's a viewer
+* for
+* jrnl
+
+2013-06-10 15:40 Did something
+I did something.
+
+
+2014-12-14 15:30 Another example of a journal entry is here.
+This is some text
+
+with various amounts
+
+
+of newlines
+
+++ and characters
+
+1234-04-12 15:3 not a date
+
+今日は

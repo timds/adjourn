@@ -9,12 +9,15 @@ copyright:           2017 timds
 build-type:          Simple
 extra-source-files:  README.md
 cabal-version:       >=1.10
+data-files:          tests/data/example.txt
+                   , tests/data/example2.txt
+                   , tests/data/example_pw123
 
 library
   hs-source-dirs:      src
   exposed-modules:     Adjrn.Parse
-  build-depends:       base >= 4.7 && < 5
-                     , attoparsec
+  build-depends:       attoparsec
+                     , base >= 4.7 && < 5
                      , bytestring
                      , containers
                      , cryptocipher
@@ -29,12 +32,29 @@ executable adjrn
   main-is:             Main.hs
   ghc-options:         -threaded -rtsopts -with-rtsopts=-N
   default-language:    Haskell2010
-  build-depends:       base >=4.7 && <5
-                     , text
+  build-depends:       adjrn
+                     , base >=4.7 && <5
+                     , brick
                      , bytestring
                      , containers
-                     , vector
                      , mtl
-                     , brick
+                     , text
+                     , vector
                      , vty
+
+test-suite tests
+  type:                exitcode-stdio-1.0
+  hs-source-dirs:      tests
+  main-is:             Spec.hs
+  other-modules:       Adjrn.ParseSpec
+  ghc-options:         -threaded -rtsopts -with-rtsopts=-N
+  default-language:    Haskell2010
+  build-depends:       QuickCheck
                      , adjrn
+                     , base
+                     , containers
+                     , hspec
+                     , hspec-attoparsec
+                     , raw-strings-qq
+                     , text
+                     , time

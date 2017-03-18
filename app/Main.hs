@@ -11,7 +11,7 @@ import           System.IO
 
 main :: IO ()
 main = do
-  mjournal <- do
+  ejournal <- do
     args <- getArgs
     case args of
       [path, opt] | opt == "--decrypt" || opt == "-d" ->
@@ -20,12 +20,12 @@ main = do
       _  -> do
         putStrLn "Usage: adjrn journal_file [--decrypt | -d]"
         exitFailure
-  case mjournal of
-    Just journal -> do
+  case ejournal of
+    Right journal -> do
       runAdjrn journal
       exitSuccess
-    Nothing -> do
-      putStrLn "Error parsing journal"
+    Left e -> do
+      putStrLn $ "Error parsing journal: " ++ show e
       exitFailure
 
 askPassword :: IO ByteString
