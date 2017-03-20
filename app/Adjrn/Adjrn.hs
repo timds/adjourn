@@ -9,6 +9,8 @@ import           Brick.Util
 import           Brick.Widgets.Border
 import           Brick.Widgets.Core
 import           Brick.Widgets.List
+import           Data.DList (DList)
+import qualified Data.DList as DL
 import           Data.List (foldl')
 import qualified Data.Map as M
 import           Data.Monoid ((<>))
@@ -102,29 +104,29 @@ drawEntryListItem selected (Entry _ star date t) =
 
 -- run naive greedy algorithm on spaces as the only splitter
 wrapText :: Int -> Text -> [Text]
-wrapText width t = T.lines t >>= \ln -> do
+wrapText width t = DL.toList $ DL.fromList (T.lines t) >>= \ln -> do
   case textWidth ln of
-    w | w <= width -> [ln]
-    w | w > width -> wrapLine width ln ++ [" "]
+    w | w <= width -> DL.singleton ln
+    w | w > width -> DL.snoc (wrapLine width ln) " "
 
 -- Wraps text assuming there are no new lines.
-wrapLine :: Int -> Text -> [Text]
+wrapLine :: Int -> Text -> DList Text
 wrapLine width line =
   let (_,res,lastLine) =
-        foldl' go (width,[],[]) $
+        foldl' go (width,DL.empty,DL.empty) $
         T.chunksOf width =<< T.words line
-  in res ++ [T.unwords lastLine]
+  in DL.snoc res $ T.unwords $ DL.toList lastLine
   where
     spaceWidth = textWidth (" " :: Text)
     go (spaceLeft, lns, currentLine) word
       | wordWidth > spaceLeft =
           ( width - wordWidth
-          , lns ++ [T.unwords currentLine]
-          , T.chunksOf width word)
+          , DL.snoc lns (T.unwords $ DL.toList currentLine)
+          , DL.fromList (T.chunksOf width word))
       | otherwise =
           (spaceLeft - (wordWidth + spaceWidth),
            lns,
-           currentLine ++ T.chunksOf width word)
+           DL.append currentLine (DL.fromList $ T.chunksOf width word))
       where wordWidth = textWidth word
 
 entryText :: Entry -> Text
@@ -153,5 +155,5 @@ bodyW lst =
         bodyText = maybe "" (entryText . snd) $
                    listSelectedElement lst
         bodyLines = wrapText (width - 1) bodyText
-    render . vLimit (length bodyLines) .
-      vBox $ map txt bodyLines
+    render . vLimit (length bodyLines) . vBox
+      $ map txt bodyLines

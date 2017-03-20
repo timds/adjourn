@@ -21,3 +21,4 @@ Adjrn is a terminal viewer of [jrnl](http://maebert.github.io/jrnl/) files.
 
 * Handle alternative date formats
 * Searching and filtering
+* Speed up display of long entries
