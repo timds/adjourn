@@ -15,15 +15,19 @@ data-files:          tests/data/example.txt
 
 library
   hs-source-dirs:      src
-  exposed-modules:     Adjrn.Parse
-  build-depends:       attoparsec
+  exposed-modules:     Adjrn.Config
+                     , Adjrn.Parse
+  build-depends:       aeson
+                     , attoparsec
                      , base >= 4.7 && < 5
                      , bytestring
                      , containers
                      , cryptocipher
                      , cryptohash
+                     , directory
                      , text
                      , time
+                     , unordered-containers
   default-language:    Haskell2010
 
 executable adjrn
@@ -37,8 +41,11 @@ executable adjrn
                      , brick
                      , bytestring
                      , containers
+                     , directory
+                     , either
                      , mtl
                      , text
+                     , unordered-containers
                      , vector
                      , vty
 
