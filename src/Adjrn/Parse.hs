@@ -15,9 +15,7 @@ import           Crypto.Hash.SHA256 as SHA256 (hash)
 import           Data.Attoparsec.Text as P
 import           Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
-import           Data.Either (isLeft, isRight, partitionEithers)
-import           Data.Foldable
-import           Data.List (foldl', groupBy)
+import           Data.List (foldl')
 import           Data.Map (Map)
 import qualified Data.Map as M
 import           Data.Monoid ((<>))
@@ -26,7 +24,6 @@ import qualified Data.Text as T
 import           Data.Text.Encoding (decodeUtf8)
 import qualified Data.Text.IO as TIO
 import           Data.Time
-import           System.IO
 
 data Journal = Journal
   { tags :: Map Text Int
@@ -40,7 +37,9 @@ data Entry = Entry
   , title :: Text
   } deriving (Show, Eq)
 
-readJournal :: FilePath -> Maybe ByteString -> IO (Either String Journal)
+readJournal :: FilePath -- | Path to journal file
+            -> Maybe ByteString -- | Password to an encrypted journal file
+            -> IO (Either String Journal)
 readJournal f Nothing = parseOnly parseJournal <$> TIO.readFile f
 readJournal f (Just pw) = parseOnly parseJournal . decrypt pw <$> BS.readFile f
 
@@ -51,8 +50,10 @@ decrypt :: ByteString -> ByteString -> Text
 decrypt pw txt =
   let hashed = SHA256.hash pw
       (ivRaw, jrnl) = BS.splitAt 16 txt
-      cipher = either (error . show) cipherInit $ (makeKey hashed) :: AES256
-      iv = maybe (error "Could not decrypt: invalid IV") id $ makeIV ivRaw :: IV AES256
+      cipher = either (error . show) cipherInit
+               $ (makeKey hashed) :: AES256
+      iv = maybe (error "Could not decrypt: invalid IV") id
+           $ makeIV ivRaw :: IV AES256
   in T.init . decodeUtf8 $ cbcDecrypt cipher iv jrnl
 
 parseJournal :: Parser Journal
@@ -71,11 +72,9 @@ parseLine = do
   return $ T.append ln "\n"
 
 toEntries :: [Either LocalTime Text] -> Either String [(LocalTime, Text)]
-toEntries es = (\xs -> maybe xs  (:xs) ((,lastBody) <$> lastDate)) <$> res
+toEntries es = (\xs -> maybe xs (:xs) ((,lastBody) <$> lastDate)) <$> result
   where
-    (res,lastDate,lastBody) = foldl' go (Right [], Nothing, "") es
-    lastPair (Just date) body = Just (date,body)
-    lastPair Nothing _ = Nothing
+    (result,lastDate,lastBody) = foldl' go (Right [], Nothing, "") es
     go (res, Nothing, b) (Left dt) =
       (res, Just dt, b)
 
@@ -85,7 +84,8 @@ toEntries es = (\xs -> maybe xs  (:xs) ((,lastBody) <$> lastDate)) <$> res
     go (res, Just dt, body) (Right t) =
       (res, Just dt, body <> t)
 
-    go (res,Nothing,b) (Right _) = (Left "No date for text", Nothing, b)
+    go (_,Nothing,b) (Right _) = (Left "No date for text", Nothing, b)
+    go e _ = e
 
 toJournal :: [(LocalTime, Text)] -> Journal
 toJournal lst = Journal M.empty es
@@ -106,5 +106,6 @@ parseDate = do
   hr <- count 2 digit
   char ':'
   minutes <- count 2 digit
-  return $ LocalTime { localDay = fromGregorian (read y) (read m) (read d)
-                     , localTimeOfDay = TimeOfDay (read hr) (read minutes) 0}
+  return $ LocalTime
+    { localDay = fromGregorian (read y) (read m) (read d)
+    , localTimeOfDay = TimeOfDay (read hr) (read minutes) 0}
