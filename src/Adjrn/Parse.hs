@@ -37,8 +37,8 @@ data Entry = Entry
   , title :: Text
   } deriving (Show, Eq)
 
-readJournal :: FilePath -- | Path to journal file
-            -> Maybe ByteString -- | Password to an encrypted journal file
+readJournal :: FilePath
+            -> Maybe ByteString
             -> IO (Either String Journal)
 readJournal f Nothing = parseOnly parseJournal <$> TIO.readFile f
 readJournal f (Just pw) = parseOnly parseJournal . decrypt pw <$> BS.readFile f

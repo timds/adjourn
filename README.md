@@ -1,4 +1,4 @@
-# Adjrn
+# Adjrn [![Build Status](https://travis-ci.org/timds/adjrn.svg?branch=master)](https://travis-ci.org/timds/adjrn)
 
 Adjrn is a terminal viewer of [jrnl](http://maebert.github.io/jrnl/)
 files.
