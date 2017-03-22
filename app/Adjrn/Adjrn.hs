@@ -16,6 +16,8 @@ import qualified Data.Map as M
 import           Data.Monoid ((<>))
 import           Data.Text (Text)
 import qualified Data.Text as T
+import qualified Data.Text.Lazy as TL
+import qualified Data.Text.Lazy.Builder as TB
 import qualified Data.Vector as Vec
 import           Graphics.Vty as V
 
@@ -60,9 +62,12 @@ handleEvent :: AdjState -> BrickEvent Window ()
 handleEvent s e = case e of
   VtyEvent (V.EvKey (V.KChar 'q') []) ->
     if entryOpen s
-    then continue $ s { entryOpen = not (entryOpen s) }
+    then do
+      invalidateCacheEntry BodyVP
+      continue $ s { entryOpen = not (entryOpen s) }
     else halt s
-  VtyEvent (V.EvKey V.KEnter [])->
+  VtyEvent (V.EvKey V.KEnter [])-> do
+    invalidateCacheEntry BodyVP
     continue $ s { entryOpen = not (entryOpen s) }
   VtyEvent (V.EvKey (V.KChar 'j') []) -> do
     if entryOpen s
@@ -84,6 +89,7 @@ handleEvent s e = case e of
         continue $ s { jrnl = newL }
   VtyEvent ev -> do
     newList <- handleListEvent ev (jrnl s)
+    invalidateCacheEntry BodyVP
     continue (s { jrnl = newList})
   _ -> continue s
 
@@ -113,20 +119,20 @@ wrapText width t = DL.toList $ DL.fromList (T.lines t) >>= \ln -> do
 wrapLine :: Int -> Text -> DList Text
 wrapLine width line =
   let (_,res,lastLine) =
-        foldl' go (width,DL.empty,DL.empty) $
+        foldl' go (width, DL.empty, mempty) $
         T.chunksOf width =<< T.words line
-  in DL.snoc res $ T.unwords (DL.toList lastLine)
+  in DL.snoc res (TL.toStrict . TB.toLazyText $ lastLine)
   where
     spaceWidth = textWidth (" " :: Text)
     go (spaceLeft, lns, currentLine) word
       | wordWidth > spaceLeft =
           ( width - wordWidth
-          , DL.snoc lns (T.unwords $ DL.toList currentLine)
-          , DL.singleton word)
+          , DL.snoc lns (TL.toStrict . TB.toLazyText $ currentLine)
+          , TB.fromText word <> TB.singleton ' ')
       | otherwise =
-          (spaceLeft - (wordWidth + spaceWidth),
-           lns,
-           DL.append currentLine (DL.singleton word))
+          ( spaceLeft - (wordWidth + spaceWidth)
+          , lns
+          , currentLine <> TB.fromText word <> TB.singleton ' ')
       where wordWidth = textWidth word
 
 entryText :: Entry -> Text
@@ -148,7 +154,7 @@ drawAll (AdjState lst _ isOpen)
 
 bodyW :: List Window Entry -> Widget Window
 bodyW lst =
-  viewport BodyVP Vertical $
+  viewport BodyVP Vertical . cached BodyVP $
   Widget Greedy Fixed $ do
     ctx <- getContext
     let width = availWidth ctx
