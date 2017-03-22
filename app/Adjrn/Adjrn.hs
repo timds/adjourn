@@ -107,7 +107,7 @@ wrapText :: Int -> Text -> [Text]
 wrapText width t = DL.toList $ DL.fromList (T.lines t) >>= \ln -> do
   case textWidth ln of
     w | w <= width -> DL.singleton ln
-    w | w > width -> DL.snoc (wrapLine width ln) " "
+    w | w > width -> DL.snoc (wrapLine width ln) " " -- one space is newline
 
 -- Wraps text assuming there are no new lines.
 wrapLine :: Int -> Text -> DList Text
@@ -115,18 +115,18 @@ wrapLine width line =
   let (_,res,lastLine) =
         foldl' go (width,DL.empty,DL.empty) $
         T.chunksOf width =<< T.words line
-  in DL.snoc res $ T.unwords $ DL.toList lastLine
+  in DL.snoc res $ T.unwords (DL.toList lastLine)
   where
     spaceWidth = textWidth (" " :: Text)
     go (spaceLeft, lns, currentLine) word
       | wordWidth > spaceLeft =
           ( width - wordWidth
           , DL.snoc lns (T.unwords $ DL.toList currentLine)
-          , DL.fromList (T.chunksOf width word))
+          , DL.singleton word)
       | otherwise =
           (spaceLeft - (wordWidth + spaceWidth),
            lns,
-           DL.append currentLine (DL.fromList $ T.chunksOf width word))
+           DL.append currentLine (DL.singleton word))
       where wordWidth = textWidth word
 
 entryText :: Entry -> Text
