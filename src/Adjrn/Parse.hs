@@ -1,13 +1,7 @@
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE OverloadedStrings #-}
 
-module Adjrn.Parse
-  ( Entry(..)
-  , Journal(..)
-  , readJournal
-  , parseJournal
-  )
-where
+module Adjrn.Parse where
 
 import           Control.Applicative ((<|>))
 import           Crypto.Cipher
@@ -15,6 +9,7 @@ import           Crypto.Hash.SHA256 as SHA256 (hash)
 import           Data.Attoparsec.Text as P
 import           Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
+import           Data.Either
 import           Data.List (foldl')
 import           Data.Map (Map)
 import qualified Data.Map as M
@@ -58,54 +53,52 @@ decrypt pw txt =
 
 parseJournal :: Parser Journal
 parseJournal = do
-  skipWhile (\c -> isHorizontalSpace c || isEndOfLine c)
-  es <- many' $ (Left <$> parseDate <* space)
-        <|> (Right <$> parseLine)
-  case toJournal <$> toEntries es of
+  skipSpace
+  es <- many' $ (Left <$> headerLine) <|> (Right <$> parseLine)
+  case toJournal <$> reverse <$> tupleGroup es of
     Left e -> fail e
     Right r -> return r
 
+headerLine :: Parser (LocalTime, Text)
+headerLine = do
+  time <- parseDate
+  space
+  text <- takeTill isEndOfLine <* endOfLineOrReturn
+          <|> takeText
+  return (time, text)
+
 parseLine :: Parser Text
-parseLine = do
-  ln <- P.takeWhile (/= '\n')
-  char '\n'
-  return $ T.append ln "\n"
+parseLine = P.takeTill isEndOfLine <* endOfLine
 
-toEntries :: [Either LocalTime Text] -> Either String [(LocalTime, Text)]
-toEntries es = (\xs -> maybe xs (:xs) ((,lastBody) <$> lastDate)) <$> result
-  where
-    (result,lastDate,lastBody) = foldl' go (Right [], Nothing, "") es
-    go (res, Nothing, b) (Left dt) =
-      (res, Just dt, b)
+-- `isEndOfLine` matches on \r alone; this is good enough for now
+endOfLineOrReturn :: Parser ()
+endOfLineOrReturn = endOfLine <|> (char '\r' >> return ())
 
-    go (Right res, Just lastDate, body) (Left dt) =
-      (Right $ (lastDate, body) : res, Just dt, "")
+-- Expects a list of the form: Left, [Right,..Right], Left,..
+-- Aggregates list into list of tuples (Right, [Left])
+tupleGroup :: Show b => [Either a b] -> Either String [(a, [b])]
+tupleGroup = sequenceA . go where
+  go [] = []
+  go ((Right b):xs) = [Left $ show b]
+  go ((Left a):xs) = Right (a, rights ys) : go zs
+    where (ys,zs) = span isRight xs
 
-    go (res, Just dt, body) (Right t) =
-      (res, Just dt, body <> t)
+toJournal :: [((LocalTime, Text), [Text])] -> Journal
+toJournal xs = Journal M.empty $ (map toEntry xs)
+  where toEntry ((time, title'), body) =
+          Entry (T.unlines body) False time title'
 
-    go (_,Nothing,b) (Right _) = (Left "No date for text", Nothing, b)
-    go e _ = e
-
-toJournal :: [(LocalTime, Text)] -> Journal
-toJournal lst = Journal M.empty es
-  where es = map go lst
-        go (dt, txt) =
-          let title' = T.takeWhile (\c -> c /= '\n' && c /= '.') txt
-          in Entry txt False dt title'
-
---TODO: different date formats. use time library's parsing if possible
 parseDate :: Parser LocalTime
 parseDate = do
-  y <- count 4 digit
+  y <- read <$> count 4 digit
   char '-'
-  m <- count 2 digit
+  m <- read <$> count 2 digit
   char '-'
-  d <- count 2 digit
+  d <- read <$> count 2 digit
   space
-  hr <- count 2 digit
+  hr <- read <$> count 2 digit
   char ':'
-  minutes <- count 2 digit
+  minutes <- read <$> count 2 digit
   return $ LocalTime
-    { localDay = fromGregorian (read y) (read m) (read d)
-    , localTimeOfDay = TimeOfDay (read hr) (read minutes) 0}
+    { localDay = fromGregorian y m d
+    , localTimeOfDay = TimeOfDay hr minutes 0}
