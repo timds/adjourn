@@ -92,15 +92,9 @@ ex1Journal = Journal
 ex2 :: FilePath
 ex2 = "tests/data/example2.txt"
 
-ex1encrypted :: FilePath
-ex1encrypted = "tests/data/example_pw123"
 
 formatDate :: LocalTime -> Text
 formatDate = T.dropEnd 3 . T.pack . show
-
-stripExtraNLs :: Journal -> Journal
-stripExtraNLs (Journal tags es) = Journal tags $ flip map es $ \e ->
-  e { body = T.dropWhileEnd (== '\n') (body e)}
 
 spec :: Spec
 spec = do
@@ -118,9 +112,6 @@ spec = do
     it "should read a long journal" $ do
       j <- readJournal ex2 Nothing
       length . entries <$> j `shouldBe` Right 118
-    it "should read an encrypted journal" $ do
-      jEnc <- readJournal ex1encrypted (Just "pw123")
-      stripExtraNLs <$> jEnc `shouldBe` Right (stripExtraNLs ex1Journal)
 
   describe "headerLine" $ do
     it "should parse a simple header line" $ do

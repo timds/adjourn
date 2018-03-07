@@ -11,7 +11,6 @@ extra-source-files:  README.md
 cabal-version:       >=1.10
 data-files:          tests/data/example.txt
                    , tests/data/example2.txt
-                   , tests/data/example_pw123
 
 library
   hs-source-dirs:      src
