@@ -21,6 +21,54 @@ import           Test.QuickCheck
 import           Test.QuickCheck.Instances
 import           Text.RawString.QQ
 
+
+instance Arbitrary Journal where
+  arbitrary = Journal <$> pure M.empty <*> (ensureFinalNL <$> arbitrary)
+
+instance Arbitrary Entry where
+  arbitrary = Entry
+    <$> (ensureTrailingNL <$> arbitrary)
+    <*> pure False
+    <*> (stripSeconds <$> arbitrary)
+    <*> (takeLine <$> arbitrary)
+
+takeLine :: Text -> Text
+takeLine = T.takeWhile (\c -> c /= '\n')
+
+formatTimeJrnl :: LocalTime -> Text
+formatTimeJrnl = T.pack
+  . formatTime defaultTimeLocale "%F %H:%M"
+
+stripSeconds :: LocalTime -> LocalTime
+stripSeconds lt = lt {localTimeOfDay = (localTimeOfDay lt) {todSec=0}}
+
+ensureFinalNL :: [Entry] -> [Entry]
+ensureFinalNL [] = []
+ensureFinalNL [e] = [e { body = ensureTrailingNL (body e) }]
+ensureFinalNL (e:es) = e : ensureFinalNL es
+
+ensureTrailingNL :: Text -> Text
+ensureTrailingNL "" = "\n"
+ensureTrailingNL t =
+  if T.last t /= '\n' then t `T.snoc` '\n' else t
+
+serialiseJournal :: Journal -> Text
+serialiseJournal (Journal _ es) =
+  ensureTrailingNL . T.concat $ map serialiseEntry $ reverse es
+
+serialiseEntry :: Entry -> Text
+serialiseEntry (Entry body _ time title) =
+  formatTimeJrnl time <> " " <> takeLine title <> "\n"
+  <> body
+
+randomEntryPairs :: Gen [Either Int Double]
+randomEntryPairs = do
+  fold <$> listOf pair
+  where pair = do
+          a <- Left <$> arbitrary
+          bs <- (fmap . fmap) Right (listOf arbitrary)
+          return $ a:bs
+
 ex1 :: FilePath
 ex1 = "tests/data/example.txt"
 
@@ -92,19 +140,27 @@ ex1Journal = Journal
 ex2 :: FilePath
 ex2 = "tests/data/example2.txt"
 
-
-formatDate :: LocalTime -> Text
-formatDate = T.dropEnd 3 . T.pack . show
+j2 = Journal
+  { tags = M.empty
+  , entries =
+    [defaultEntry { title="test",body="testbody\n\n",dateTime=date1}]
+  }
 
 spec :: Spec
 spec = do
   describe "parseJournal" $ do
     it "should parse a basic journal" $
-      (T.concat [ formatDate date3, " ", entry3_title, "\n", entry3
-                , formatDate date2, " ", entry2_title, "\n", entry2
-                , formatDate date1, " ", entry1_title, "\n", entry1])
-      ~> parseJournal
+      serialiseJournal ex1Journal ~> parseJournal
       `shouldParse` ex1Journal
+
+    it "should parse a one entry journal" $ do
+      serialiseJournal j2 ~> parseJournal `shouldParse` j2
+
+    prop "should parse an arbitrary journal, reversing the entry list" $ \j ->
+      let txt = serialiseJournal j
+      in counterexample (T.unpack txt) $
+         (fmap entries $ parseOnly parseJournal txt)
+         === Right (entries j)
 
   describe "readJournal" $ do
     it "should read a short journal" $ do
@@ -117,17 +173,23 @@ spec = do
     it "should parse a simple header line" $ do
       let time = "2018-03-02 04:00"
           title' = "Example of title."
-          input = time <> " " <> title'
-          parsed = parseTimeOrError False defaultTimeLocale "%F %H:%M" (T.unpack time)
+          input = time <> " " <> title' <> "\n"
+          parsed = parseTimeOrError False defaultTimeLocale
+                   "%F %H:%M" (T.unpack time)
       input ~> headerLine `shouldParse` (parsed,title')
 
     prop "should parse a timestamp and the text to the first newline"
       $ \lt t ->
-      let lt' = lt {localTimeOfDay = (localTimeOfDay lt) {todSec=0}}
-          line = T.pack (formatTime defaultTimeLocale "%F %H:%M" lt')
-                 <> " " <> t
+      let lt' = stripSeconds lt
+          timeStr = formatTimeJrnl lt'
+          line = timeStr <> " " <> t <> "\n"
           title' = takeLine t
       in parseOnly headerLine line === Right (lt', title')
+
+  describe "parseLine" $ do
+    it "parses an empty line as an empty string" $ do
+      ("\n" :: Text) ~> parseLine `shouldParse` ""
+      ("" :: Text) ~> parseLine `shouldParse` ""
 
   describe "tupleGroup" $ do
     prop "should aggregate Lefts and the following Rights" $ do
@@ -138,13 +200,7 @@ spec = do
           fmap fst pairs == lefts es &&
           fold (fmap snd pairs) == rights es
 
--- we are ok with disallowing '\r' in titles
-takeLine = T.takeWhile (\c -> c /= '\n' && c /= '\r')
-
-randomEntryPairs :: Gen [Either Int String]
-randomEntryPairs = do
-  fold <$> listOf pair
-  where pair = do
-          a <- Left <$> arbitrary
-          bs <- (fmap . fmap) Right (listOf arbitrary)
-          return $ a:bs
+  describe "parseDate" $ do
+    prop "should parse dates of form YYYY-MM-DD HH:MM" $ \time ->
+      let input = formatTimeJrnl time
+      in parseOnly parseDate input === Right (stripSeconds time)

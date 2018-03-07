@@ -49,12 +49,12 @@ decrypt pw txt =
                $ (makeKey hashed) :: AES256
       iv = maybe (error "Could not decrypt: invalid IV") id
            $ makeIV ivRaw :: IV AES256
-  in T.init . decodeUtf8 $ cbcDecrypt cipher iv jrnl
+  in decodeUtf8 $ cbcDecrypt cipher iv jrnl
 
 parseJournal :: Parser Journal
 parseJournal = do
   skipSpace
-  es <- many' $ (Left <$> headerLine) <|> (Right <$> parseLine)
+  es <- manyTill ((Left <$> headerLine) <|> (Right <$> parseLine)) endOfInput
   case toJournal <$> reverse <$> tupleGroup es of
     Left e -> fail e
     Right r -> return r
@@ -63,12 +63,12 @@ headerLine :: Parser (LocalTime, Text)
 headerLine = do
   time <- parseDate
   space
-  text <- takeTill isEndOfLine <* endOfLineOrReturn
-          <|> takeText
+  text <- takeTill (== '\n') <* char '\n'
   return (time, text)
 
 parseLine :: Parser Text
-parseLine = P.takeTill isEndOfLine <* endOfLine
+parseLine = takeTill (== '\n') <* char '\n'
+            <|> takeText
 
 -- `isEndOfLine` matches on \r alone; this is good enough for now
 endOfLineOrReturn :: Parser ()
