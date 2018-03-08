@@ -3,20 +3,16 @@
 
 module Adjrn.Parse where
 
+import           Adjrn.Crypto
 import           Control.Applicative ((<|>))
-import           Crypto.Cipher
-import           Crypto.Hash.SHA256 as SHA256 (hash)
 import           Data.Attoparsec.Text as P
 import           Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
 import           Data.Either
-import           Data.List (foldl')
 import           Data.Map (Map)
 import qualified Data.Map as M
-import           Data.Monoid ((<>))
 import           Data.Text (Text)
 import qualified Data.Text as T
-import           Data.Text.Encoding (decodeUtf8)
 import qualified Data.Text.IO as TIO
 import           Data.Time
 
@@ -36,26 +32,17 @@ readJournal :: FilePath
             -> Maybe ByteString
             -> IO (Either String Journal)
 readJournal f Nothing = parseOnly parseJournal <$> TIO.readFile f
-readJournal f (Just pw) = parseOnly parseJournal . decrypt pw <$> BS.readFile f
+readJournal f (Just pw) = readEncryptedJournal pw <$> BS.readFile f
 
--- Decrypt using AES256 in CBC.
--- Key is SHA-256 of password
--- the IV is the first 16 bytes of the file
-decrypt :: ByteString -> ByteString -> Text
-decrypt pw txt =
-  let hashed = SHA256.hash pw
-      (ivRaw, jrnl) = BS.splitAt 16 txt
-      cipher = either (error . show) cipherInit
-               $ (makeKey hashed) :: AES256
-      iv = maybe (error "Could not decrypt: invalid IV") id
-           $ makeIV ivRaw :: IV AES256
-  in decodeUtf8 $ cbcDecrypt cipher iv jrnl
+readEncryptedJournal :: ByteString -> ByteString -> Either String Journal
+readEncryptedJournal password encrypted =
+  decrypt password encrypted >>= parseOnly parseJournal
 
 parseJournal :: Parser Journal
 parseJournal = do
   skipSpace
   es <- manyTill ((Left <$> headerLine) <|> (Right <$> parseLine)) endOfInput
-  case toJournal <$> reverse <$> tupleGroup es of
+  case toJournal . reverse <$> tupleGroup es of
     Left e -> fail e
     Right r -> return r
 
@@ -69,10 +56,6 @@ headerLine = do
 parseLine :: Parser Text
 parseLine = takeTill (== '\n') <* char '\n'
             <|> takeText
-
--- `isEndOfLine` matches on \r alone; this is good enough for now
-endOfLineOrReturn :: Parser ()
-endOfLineOrReturn = endOfLine <|> (char '\r' >> return ())
 
 -- Expects a list of the form: Left, [Right,..Right], Left,..
 -- Aggregates list into list of tuples (Right, [Left])

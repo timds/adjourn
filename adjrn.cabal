@@ -16,14 +16,15 @@ library
   hs-source-dirs:      src
   exposed-modules:     Adjrn.Config
                      , Adjrn.Parse
-  build-depends:       aeson
+                     , Adjrn.Crypto
+  build-depends:       base >= 4.7 && < 5
+                     , aeson
                      , attoparsec
-                     , base >= 4.7 && < 5
                      , bytestring
                      , containers
-                     , cryptocipher
-                     , cryptohash
+                     , cryptonite
                      , directory
+                     , memory
                      , text
                      , time
                      , unordered-containers
@@ -53,13 +54,15 @@ test-suite tests
   type:                exitcode-stdio-1.0
   hs-source-dirs:      tests
   main-is:             Spec.hs
-  other-modules:       Adjrn.ParseSpec
+  other-modules:       Adjrn.CryptoSpec
+                     , Adjrn.ParseSpec
   ghc-options:         -threaded -rtsopts -with-rtsopts=-N
   default-language:    Haskell2010
   build-depends:       base
                      , QuickCheck
                      , adjrn
                      , attoparsec
+                     , bytestring
                      , containers
                      , hspec
                      , hspec-attoparsec

@@ -2,18 +2,21 @@
 {-# LANGUAGE QuasiQuotes #-}
 module Adjrn.ParseSpec (spec) where
 
+import           Adjrn.Crypto
 import           Adjrn.Parse
 import           Data.Attoparsec.Text (parseOnly)
+import qualified Data.ByteString as BS
 import           Data.Either
 import           Data.Foldable
 import qualified Data.Map as M
-import           Data.Either
 import           Data.Monoid
 import           Data.Text (Text)
 import qualified Data.Text as T
+import           Data.Text.Encoding (encodeUtf8)
 import           Data.Time.Calendar
 import           Data.Time.Format
 import           Data.Time.LocalTime
+import           Data.Word
 import           Test.Hspec
 import           Test.Hspec.Attoparsec
 import           Test.Hspec.QuickCheck
@@ -23,7 +26,9 @@ import           Text.RawString.QQ
 
 
 instance Arbitrary Journal where
-  arbitrary = Journal <$> pure M.empty <*> (ensureFinalNL <$> arbitrary)
+  arbitrary = do
+    es <- ensureFinalNL <$> arbitrary `suchThat` ((> 0) . length)
+    return $ Journal M.empty es
 
 instance Arbitrary Entry where
   arbitrary = Entry
@@ -140,21 +145,27 @@ ex1Journal = Journal
 ex2 :: FilePath
 ex2 = "tests/data/example2.txt"
 
-j2 = Journal
+jrnlWithNLs = Journal
   { tags = M.empty
   , entries =
-    [defaultEntry { title="test",body="testbody\n\n",dateTime=date1}]
+    [defaultEntry { title="test t",body="\n\ntest\n\n\nbody\n\n",dateTime=date1}]
   }
 
 spec :: Spec
 spec = do
+  describe "readJournal" $
+    it "should read a long journal file" $ do
+      j <- readJournal ex2 Nothing
+      length . entries <$> j `shouldBe` Right 118
+
   describe "parseJournal" $ do
     it "should parse a basic journal" $
       serialiseJournal ex1Journal ~> parseJournal
-      `shouldParse` ex1Journal
+        `shouldParse` ex1Journal
 
-    it "should parse a one entry journal" $ do
-      serialiseJournal j2 ~> parseJournal `shouldParse` j2
+    it "should preserve newlines" $
+      serialiseJournal jrnlWithNLs ~> parseJournal
+        `shouldParse` jrnlWithNLs
 
     prop "should parse an arbitrary journal, reversing the entry list" $ \j ->
       let txt = serialiseJournal j
@@ -162,12 +173,13 @@ spec = do
          (fmap entries $ parseOnly parseJournal txt)
          === Right (entries j)
 
-  describe "readJournal" $ do
-    it "should read a short journal" $ do
-      readJournal ex1 Nothing >>= (`shouldBe` Right ex1Journal)
-    it "should read a long journal" $ do
-      j <- readJournal ex2 Nothing
-      length . entries <$> j `shouldBe` Right 118
+  describe "readEncryptedJournal" $ do
+    prop "can decrypt an arbitrary encrypted jounal" $ \j -> do
+      pw <- arbitrary `suchThat` ((> 0) . T.length)
+      iv <- BS.pack <$> vector 16
+      let txt = serialiseJournal j
+          enc = encrypt pw txt iv
+      return $ readEncryptedJournal (encodeUtf8 pw) enc === Right j
 
   describe "headerLine" $ do
     it "should parse a simple header line" $ do
